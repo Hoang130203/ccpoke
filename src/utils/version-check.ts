@@ -1,11 +1,19 @@
+import { execSync } from "node:child_process";
+
+import * as p from "@clack/prompts";
+
 import { t } from "../i18n/index.js";
-import { InstallMethod } from "./constants.js";
+import { InstallMethod, PackageManager } from "./constants.js";
 import { detectInstallMethod } from "./install-detection.js";
-import { logWarn } from "./log.js";
 import { getPackageVersion } from "./paths.js";
 
 const NPM_REGISTRY_URL = "https://registry.npmjs.org/ccpoke/latest";
 const VERSION_CHECK_TIMEOUT_MS = 5_000;
+
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+}
 
 function isNewerVersion(current: string, latest: string): boolean {
   const currentParts = current.split(".").map(Number);
@@ -33,23 +41,6 @@ function getUpdateCommand(): string {
   }
 }
 
-function formatUpdateBox(currentVersion: string, latestVersion: string): string {
-  const lines = [
-    "",
-    t("versionCheck.updateAvailable", { latest: latestVersion, current: currentVersion }),
-    t("versionCheck.runToUpdate", { command: getUpdateCommand() }),
-    "",
-  ];
-
-  const maxLen = Math.max(...lines.map((l) => l.length));
-  const top = "┏" + "━".repeat(maxLen + 2) + "┓";
-  const bottom = "┗" + "━".repeat(maxLen + 2) + "┛";
-
-  const boxLines = lines.map((l) => `┃ ${l.padEnd(maxLen)} ┃`);
-
-  return [top, ...boxLines, bottom].join("\n");
-}
-
 async function fetchLatestVersion(): Promise<string | null> {
   try {
     const controller = new AbortController();
@@ -71,14 +62,87 @@ async function fetchLatestVersion(): Promise<string | null> {
   }
 }
 
-export async function checkForUpdates(): Promise<void> {
+export async function fetchUpdateInfo(): Promise<UpdateInfo | null> {
   const currentVersion = getPackageVersion();
-  if (currentVersion === "unknown") return;
+  if (currentVersion === "unknown") return null;
 
   const latestVersion = await fetchLatestVersion();
-  if (!latestVersion) return;
+  if (!latestVersion) return null;
 
   if (isNewerVersion(currentVersion, latestVersion)) {
-    logWarn(formatUpdateBox(currentVersion, latestVersion), { showTimestamp: false });
+    return { currentVersion, latestVersion };
   }
+
+  return null;
+}
+
+function detectGlobalPackageManager(): PackageManager {
+  const scriptPath = process.argv[1] ?? "";
+
+  if (scriptPath.includes(PackageManager.Pnpm)) return PackageManager.Pnpm;
+  if (scriptPath.includes(PackageManager.Yarn)) return PackageManager.Yarn;
+  if (scriptPath.includes(PackageManager.Bun)) return PackageManager.Bun;
+  return PackageManager.Npm;
+}
+
+function runUpdateInline(): boolean {
+  const method = detectInstallMethod();
+
+  if (method === InstallMethod.Npx) return true;
+
+  if (method === InstallMethod.Global) {
+    const pm = detectGlobalPackageManager();
+    const pkg = "ccpoke";
+    const cmd =
+      pm === PackageManager.Yarn ? `yarn global add ${pkg}` : `${pm} install -g ${pkg}@latest`;
+
+    try {
+      execSync(cmd, { stdio: "pipe" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+export async function promptUpdateOrContinue(info: UpdateInfo): Promise<void> {
+  const updateLabel = `${t("versionCheck.updatePrompt", { latest: info.latestVersion })} (v${info.currentVersion} → v${info.latestVersion})`;
+  const continueLabel = t("versionCheck.continueWithoutUpdate", {
+    current: info.currentVersion,
+  });
+
+  const result = await p.select({
+    message: t("versionCheck.updateAvailable", {
+      current: info.currentVersion,
+      latest: info.latestVersion,
+    }),
+    options: [
+      { value: "update", label: updateLabel },
+      { value: "continue", label: continueLabel },
+    ],
+  });
+
+  if (p.isCancel(result) || result === "continue") return;
+
+  const s = p.spinner();
+  s.start(t("versionCheck.runToUpdate", { command: getUpdateCommand() }));
+
+  const success = runUpdateInline();
+
+  if (success) {
+    s.stop(`✅ v${info.currentVersion} → v${info.latestVersion}`);
+    p.log.info(t("versionCheck.runToUpdate", { command: getUpdateCommand() }));
+    process.exit(0);
+  } else {
+    s.stop("❌");
+    p.log.warn(t("versionCheck.runToUpdate", { command: getUpdateCommand() }));
+  }
+}
+
+export async function checkForUpdates(): Promise<void> {
+  const info = await fetchUpdateInfo();
+  if (!info) return;
+  await promptUpdateOrContinue(info);
 }
