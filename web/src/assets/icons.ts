@@ -23,8 +23,10 @@ import brandClaude from "./icons/brands/claude.svg?raw";
 import brandCopilot from "./icons/brands/copilot.svg?raw";
 import brandCursor from "./icons/brands/cursor.svg?raw";
 import brandDiscord from "./icons/brands/discord.svg?raw";
+import brandGemini from "./icons/brands/gemini.svg?raw";
 import brandGoogle from "./icons/brands/google.svg?raw";
 import brandOpenai from "./icons/brands/openai.svg?raw";
+import brandSlack from "./icons/brands/slack.svg?raw";
 import brandTelegram from "./icons/brands/telegram.svg?raw";
 import brandZalo from "./icons/brands/zalo.svg?raw";
 
@@ -54,8 +56,10 @@ export const icons = {
   brandCopilot,
   brandCursor,
   brandDiscord,
+  brandGemini,
   brandGoogle,
   brandOpenai,
+  brandSlack,
   brandTelegram,
   brandZalo,
 } as const;

@@ -5,10 +5,9 @@ import { icons } from "../assets/icons";
 interface Props {
   locale: Locale;
   currentPath?: string;
-  showSectionNav?: boolean;
 }
 
-const { locale, currentPath = "/", showSectionNav = false } = Astro.props;
+const { locale, currentPath = "/" } = Astro.props;
 const base = import.meta.env.BASE_URL;
 
 function localePageHref(loc: Locale, path: string): string {
@@ -16,36 +15,36 @@ function localePageHref(loc: Locale, path: string): string {
   if (loc === DEFAULT_LOCALE) return `${base}${cleanPath ? cleanPath.slice(1) + "/" : ""}`;
   return `${base}${loc}${cleanPath}/`;
 }
-
-const navLinks = [
-  { key: "navHow", hash: "#how" },
-  { key: "navFeatures", hash: "#features" },
-  { key: "navSetup", hash: "#setup" },
-  { key: "navRoadmap", hash: "#roadmap" },
-];
 ---
 
-<nav class="sticky top-0 z-[100] backdrop-blur-[12px] border-b border-border" style="background: color-mix(in srgb, var(--color-bg) 85%, transparent)">
-  <div class="max-w-content mx-auto px-6 h-14 flex items-center gap-6">
-    <a href={localePageHref(locale, "/")} class="flex items-center gap-1.5 no-underline text-txt shrink-0">
-      <span class="w-8 h-8 block [&>svg]:w-full [&>svg]:h-full" set:html={icons.logoFilled} />
-      <span class="font-bold text-base tracking-tight">ccpoke</span>
-    </a>
-
-    {showSectionNav && (
-      <div class="flex items-center gap-5 ml-auto nav-hide-mobile">
-        {navLinks.map(({ key, hash }) => (
-          <a href={hash} class="text-[0.78rem] font-semibold text-txt-2 no-underline hover:text-txt transition-colors duration-150 cursor-pointer">
-            {ts(locale, key)}
-          </a>
-        ))}
-      </div>
-    )}
-
-    <div class="flex items-center gap-2 ml-auto">
-      <a href={localePageHref(locale, "/brand")} class="text-[0.78rem] font-semibold text-txt-2 no-underline hover:text-txt transition-colors duration-150 cursor-pointer nav-hide-mobile">
+<nav class="sticky top-0 z-[100] backdrop-blur-[12px] border-b border-border" style="background: color-mix(in srgb, var(--color-bg) 88%, transparent)">
+  <div class="max-w-content mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-5">
+      <a href={localePageHref(locale, "/")} class="flex items-center gap-1.5 no-underline shrink-0" style="color: var(--color-accent)">
+        <span class="w-7 h-7 block [&>svg]:w-full [&>svg]:h-full" set:html={icons.logoFilled} />
+        <span class="font-bold text-base tracking-tight">ccpoke</span>
+      </a>
+      <a
+        href={localePageHref(locale, "/docs")}
+        class:list={[
+          "text-[0.78rem] font-semibold no-underline transition-colors duration-150 cursor-pointer nav-hide-mobile",
+          currentPath === "/docs" ? "text-accent" : "text-txt-2 hover:text-txt"
+        ]}
+      >
+        {ts(locale, "navDocs")}
+      </a>
+      <a
+        href={localePageHref(locale, "/brand")}
+        class:list={[
+          "text-[0.78rem] font-semibold no-underline transition-colors duration-150 cursor-pointer nav-hide-mobile",
+          currentPath === "/brand" ? "text-accent" : "text-txt-2 hover:text-txt"
+        ]}
+      >
         {ts(locale, "navBrand")}
       </a>
+    </div>
+
+    <div class="flex items-center gap-2">
       <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle theme">
         <span class="theme-toggle__sun" set:html={icons.sun} />
         <span class="theme-toggle__moon" set:html={icons.moon} />
@@ -68,33 +67,15 @@ const navLinks = [
           ))}
         </div>
       </div>
-
       <a href="https://github.com/kaida-palooza/ccpoke" target="_blank" rel="noopener"
         class="text-txt-3 hover:text-txt transition-colors duration-150 nav-hide-mobile flex items-center" aria-label={ts(locale, "ariaGitHub")}>
         <span class="w-5 h-5" set:html={icons.github} />
       </a>
-
-      {showSectionNav && (
-        <button class="mob-menu-btn" id="mobMenuBtn" type="button" aria-label={ts(locale, "ariaMenu")} aria-expanded="false" aria-controls="mobPanel">
-          <Fragment set:html={icons.menu} />
-        </button>
-      )}
     </div>
   </div>
 </nav>
 
-{showSectionNav && (
-  <div class="mob-nav-overlay" id="mobOverlay"></div>
-  <div class="mob-nav-panel" id="mobPanel" role="dialog" aria-label={ts(locale, "ariaMenu")}>
-    <button class="mob-nav-close" id="mobClose" type="button" aria-label={ts(locale, "ariaClose")}>
-      <Fragment set:html={icons.close} />
-    </button>
-    {navLinks.map(({ key, hash }) => (
-      <a href={hash} class="mob-nav-link">{ts(locale, key)}</a>
-    ))}
-    <a href={localePageHref(locale, "/brand")} class="mob-nav-link">{ts(locale, "navBrand")}</a>
-  </div>
-)}
+
 
 <script>
   import { setStorage } from "../utils/storage";
@@ -127,24 +108,5 @@ const navLinks = [
     });
   });
 
-  const mobMenuBtn = document.getElementById("mobMenuBtn");
-  const mobOverlay = document.getElementById("mobOverlay");
-  const mobClose = document.getElementById("mobClose");
-  const mobPanel = document.getElementById("mobPanel");
 
-  function openMobMenu() {
-    mobOverlay?.classList.add("open");
-    mobPanel?.classList.add("open");
-    mobMenuBtn?.setAttribute("aria-expanded", "true");
-  }
-  function closeMobMenu() {
-    mobOverlay?.classList.remove("open");
-    mobPanel?.classList.remove("open");
-    mobMenuBtn?.setAttribute("aria-expanded", "false");
-  }
-
-  mobMenuBtn?.addEventListener("click", openMobMenu);
-  mobOverlay?.addEventListener("click", closeMobMenu);
-  mobClose?.addEventListener("click", closeMobMenu);
-  mobPanel?.querySelectorAll("a").forEach((a) => a.addEventListener("click", closeMobMenu));
 </script>

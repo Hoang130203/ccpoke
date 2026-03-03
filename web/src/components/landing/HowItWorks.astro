@@ -11,6 +11,7 @@ const { locale } = Astro.props;
 const leftNodes = [
   { name: "Claude Code", icon: icons.brandClaude, active: true },
   { name: "Cursor CLI", icon: icons.brandCursor, active: true },
+  { name: "Gemini CLI", icon: icons.brandGemini, active: false },
   { name: "Antigravity", icon: icons.brandGoogle, active: false },
   { name: "Codex CLI", icon: icons.brandOpenai, active: true },
   { name: "Copilot", icon: icons.brandCopilot, active: false },
@@ -19,6 +20,7 @@ const leftNodes = [
 const rightNodes = [
   { name: "Telegram", icon: icons.brandTelegram, active: true },
   { name: "Discord", icon: icons.brandDiscord, active: false },
+  { name: "Slack", icon: icons.brandSlack, active: false },
   { name: "Zalo", icon: icons.brandZalo, active: false },
 ];
 ---
@@ -36,6 +38,7 @@ const rightNodes = [
         <div class={`flow-node flow-node--${node.active ? "active" : "inactive"}`} data-flow-node="left" data-flow-active={node.active ? "true" : "false"}>
           <span class="flow-node__icon" set:html={node.icon} />
           <span>{node.name}</span>
+          {!node.active && <span class="flow-node__soon">{ts(locale, "howSoon")}</span>}
         </div>
       ))}
     </div>
@@ -61,6 +64,7 @@ const rightNodes = [
         <div class={`flow-node flow-node--${node.active ? "active" : "inactive"}`} data-flow-node="right" data-flow-active={node.active ? "true" : "false"}>
           <span class="flow-node__icon" set:html={node.icon} />
           <span>{node.name}</span>
+          {!node.active && <span class="flow-node__soon">{ts(locale, "howSoon")}</span>}
         </div>
       ))}
     </div>

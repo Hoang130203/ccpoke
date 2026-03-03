@@ -17,7 +17,7 @@ export function getStaticPaths() {
 const locale = (Astro.props.locale ?? DEFAULT_LOCALE) as Locale;
 ---
 
-<BaseLayout locale={locale} currentPath="/" showSectionNav>
+<BaseLayout locale={locale} currentPath="/">
   <main class="max-w-content mx-auto px-6">
     <HeroSection locale={locale} />
     <HowItWorks locale={locale} />
