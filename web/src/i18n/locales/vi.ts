@@ -267,8 +267,6 @@ export const vi: LocaleDict = {
   ]
 }`,
 
-  docsFaqTitle: "Câu hỏi thường gặp",
-
   docsPaginationPrev: "Trang trước",
   docsPaginationNext: "Trang sau",
 

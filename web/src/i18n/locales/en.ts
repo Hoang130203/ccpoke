@@ -271,8 +271,6 @@ const en = {
   ]
 }`,
 
-  docsFaqTitle: "FAQ",
-
   docsPaginationPrev: "Previous",
   docsPaginationNext: "Next",
 

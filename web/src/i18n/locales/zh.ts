@@ -267,8 +267,6 @@ export const zh: LocaleDict = {
   ]
 }`,
 
-  docsFaqTitle: "常见问题",
-
   docsPaginationPrev: "上一页",
   docsPaginationNext: "下一页",
 
