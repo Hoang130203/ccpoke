@@ -3,7 +3,10 @@ import { basename } from "node:path";
 
 import { AgentHandler } from "./agent/agent-handler.js";
 import { createDefaultRegistry } from "./agent/agent-registry.js";
+import { DiscordChannel } from "./channel/discord/discord-channel.js";
+import { SlackChannel } from "./channel/slack/slack-channel.js";
 import { TelegramChannel } from "./channel/telegram/telegram-channel.js";
+import type { ChannelDeps, NotificationChannel } from "./channel/types.js";
 import { runHelp } from "./commands/help.js";
 import { runProject } from "./commands/project.js";
 import { runSetup } from "./commands/setup.js";
@@ -16,7 +19,7 @@ import { SessionMap } from "./tmux/session-map.js";
 import { SessionStateManager } from "./tmux/session-state.js";
 import { TmuxBridge } from "./tmux/tmux-bridge.js";
 import { TmuxSessionResolver } from "./tmux/tmux-session-resolver.js";
-import { CliCommand, InstallMethod, isWindows } from "./utils/constants.js";
+import { ChannelName, CliCommand, InstallMethod, isWindows } from "./utils/constants.js";
 import { detectInstallMethod } from "./utils/install-detection.js";
 import { log, logError, logWarn } from "./utils/log.js";
 import { ensureShellCompletion } from "./utils/shell-completion.js";
@@ -135,7 +138,22 @@ async function startBot(): Promise<void> {
     logError(t("tunnel.failed"), err);
   }
 
-  const channel = new TelegramChannel(cfg, sessionMap, stateManager, tmuxBridge, registry);
+  let channel: NotificationChannel;
+
+  const deps: ChannelDeps = { sessionMap, stateManager, tmuxBridge, registry };
+
+  switch (cfg.channel) {
+    case ChannelName.Discord:
+      channel = new DiscordChannel(cfg, deps);
+      break;
+    case ChannelName.Slack:
+      channel = new SlackChannel(cfg, deps);
+      break;
+    default:
+      channel = new TelegramChannel(cfg, deps);
+      break;
+  }
+
   const handler = new AgentHandler(registry, channel, cfg.hook_port, tunnelManager, chatResolver);
 
   handler.onSessionStart = (rawEvent) => {

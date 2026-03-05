@@ -5,6 +5,7 @@ import { t } from "../../i18n/index.js";
 import type { SessionMap } from "../../tmux/session-map.js";
 import type { TmuxBridge } from "../../tmux/tmux-bridge.js";
 import { log, logDebug, logError } from "../../utils/log.js";
+import { summarizeTool } from "../summarize-tool.js";
 import { escapeMarkdownV2 } from "./escape-markdown.js";
 
 interface PendingPermission {
@@ -46,7 +47,7 @@ export class PermissionRequestHandler {
     }
 
     const pendingId = this.nextPendingId++;
-    const toolSummary = this.summarizeTool(event.toolName, event.toolInput);
+    const toolSummary = summarizeTool(event.toolName, event.toolInput);
     const session = this.sessionMap.getBySessionId(event.sessionId);
     const projectName = session?.project ?? "unknown";
 
@@ -149,29 +150,6 @@ export class PermissionRequestHandler {
     return `${header}\n\n${tool}`;
   }
 
-  private summarizeTool(toolName: string, input: Record<string, unknown>): string {
-    switch (toolName) {
-      case "Bash":
-        return typeof input.command === "string" ? truncate(input.command, 120) : toolName;
-      case "Edit":
-      case "Write":
-      case "Read":
-      case "Glob":
-      case "Grep":
-        return typeof input.file_path === "string"
-          ? input.file_path
-          : typeof input.path === "string"
-            ? input.path
-            : typeof input.pattern === "string"
-              ? input.pattern
-              : toolName;
-      case "Agent":
-        return typeof input.description === "string" ? truncate(input.description, 80) : toolName;
-      default:
-        return toolName;
-    }
-  }
-
   private setPending(pendingId: number, pp: PendingPermission): void {
     this.pending.set(pendingId, pp);
     const timer = setTimeout(() => this.clearPending(pendingId), EXPIRE_MS);
@@ -184,9 +162,4 @@ export class PermissionRequestHandler {
     if (timer) clearTimeout(timer);
     this.timers.delete(pendingId);
   }
-}
-
-function truncate(str: string, max: number): string {
-  if (str.length <= max) return str;
-  return str.slice(0, max - 3) + "...";
 }

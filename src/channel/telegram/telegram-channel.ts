@@ -1,5 +1,3 @@
-import { execSync } from "node:child_process";
-
 import TelegramBot from "node-telegram-bot-api";
 
 import type {
@@ -17,7 +15,8 @@ import type { TmuxBridge } from "../../tmux/tmux-bridge.js";
 import { log, logDebug, logError, logWarn } from "../../utils/log.js";
 import { extractProseSnippet } from "../../utils/markdown.js";
 import { formatDuration, formatModelName, formatTokenCount } from "../../utils/stats-format.js";
-import type { NotificationChannel, NotificationData } from "../types.js";
+import { autoTrustWorkspace, launchAgent } from "../agent-launcher.js";
+import type { ChannelDeps, NotificationChannel, NotificationData } from "../types.js";
 import { AskQuestionHandler } from "./ask-question-handler.js";
 import { escapeMarkdownV2, isInlineMessage, markdownToTelegramV2 } from "./escape-markdown.js";
 import { PendingReplyStore } from "./pending-reply-store.js";
@@ -41,18 +40,12 @@ export class TelegramChannel implements NotificationChannel {
   private askQuestionHandler: AskQuestionHandler | null = null;
   private permissionRequestHandler: PermissionRequestHandler | null = null;
 
-  constructor(
-    cfg: Config,
-    sessionMap?: SessionMap,
-    stateManager?: SessionStateManager,
-    tmuxBridge?: TmuxBridge,
-    registry?: AgentRegistry
-  ) {
+  constructor(cfg: Config, deps?: ChannelDeps) {
     this.cfg = cfg;
-    this.sessionMap = sessionMap ?? null;
-    this.stateManager = stateManager ?? null;
-    this.tmuxBridge = tmuxBridge ?? null;
-    this.registry = registry ?? null;
+    this.sessionMap = deps?.sessionMap ?? null;
+    this.stateManager = deps?.stateManager ?? null;
+    this.tmuxBridge = deps?.tmuxBridge ?? null;
+    this.registry = deps?.registry ?? null;
     this.bot = new TelegramBot(cfg.telegram_bot_token, { polling: false });
     this.chatId = ConfigManager.loadChatState().chat_id;
     this.registerHandlers();
@@ -535,13 +528,16 @@ export class TelegramChannel implements NotificationChannel {
     if (!this.tmuxBridge || !query.message) return;
 
     try {
-      const startCommand = resolveAgentStartCommand(agentKey);
-      const tmuxSession = this.getTmuxSessionName();
-      const paneTarget = this.tmuxBridge.createPane(tmuxSession, project.path);
-      this.tmuxBridge.sendKeys(paneTarget, startCommand, ["Enter"]);
+      const { paneTarget, needsTrust } = launchAgent(this.tmuxBridge, project.path, agentKey);
 
-      if (agentKey === AgentName.Cursor || agentKey === AgentName.GeminiCli) {
-        this.autoTrustWorkspace(paneTarget, agentKey);
+      if (needsTrust) {
+        autoTrustWorkspace(
+          this.tmuxBridge,
+          paneTarget,
+          agentKey,
+          () => {},
+          () => {}
+        );
       }
 
       log(`[Projects] started ${agentKey} in ${paneTarget} for ${project.name}`);
@@ -556,29 +552,6 @@ export class TelegramChannel implements NotificationChannel {
         t("projects.startFailed", { project: project.name })
       );
     }
-  }
-
-  private autoTrustWorkspace(paneTarget: string, agentKey: string): void {
-    let attempts = 0;
-    const maxAttempts = 10;
-
-    const interval = setInterval(() => {
-      attempts++;
-      if (attempts > maxAttempts || !this.tmuxBridge) {
-        clearInterval(interval);
-        return;
-      }
-      try {
-        const content = this.tmuxBridge.capturePane(paneTarget, 10);
-        if (content.includes("Trust")) {
-          this.tmuxBridge.sendSpecialKey(paneTarget, "Enter");
-          logDebug(`[${agentKey}] auto-trusted workspace at ${paneTarget}`);
-          clearInterval(interval);
-        }
-      } catch {
-        clearInterval(interval);
-      }
-    }, 1000);
   }
 
   /** Session sub-menu: Chat / Close */
@@ -675,34 +648,6 @@ export class TelegramChannel implements NotificationChannel {
     });
   }
 
-  private getTmuxSessionName(): string {
-    // If ccpoke was started inside tmux, use that session
-    if (process.env.TMUX) {
-      try {
-        return execSync("tmux display-message -p '#{session_name}'", {
-          encoding: "utf-8",
-          stdio: "pipe",
-          timeout: 3000,
-        }).trim();
-      } catch {
-        // fall through
-      }
-    }
-
-    // Fallback: first available session
-    try {
-      const output = execSync("tmux list-sessions -F '#{session_name}'", {
-        encoding: "utf-8",
-        stdio: "pipe",
-        timeout: 3000,
-      }).trim();
-      const first = output.split("\n")[0];
-      return first || "0";
-    } catch {
-      return "0";
-    }
-  }
-
   private registerPollingErrorHandler(): void {
     this.bot.on("polling_error", () => {
       if (!this.isDisconnected) {
@@ -718,15 +663,4 @@ export class TelegramChannel implements NotificationChannel {
       }
     });
   }
-}
-
-const AGENT_START_COMMANDS: Record<string, string> = {
-  [AgentName.ClaudeCode]: "claude --dangerously-skip-permissions",
-  [AgentName.Cursor]: "cursor agent --force",
-  [AgentName.Codex]: "codex --full-auto",
-  [AgentName.GeminiCli]: "gemini --yolo",
-};
-
-function resolveAgentStartCommand(agent: string): string {
-  return AGENT_START_COMMANDS[agent] ?? AGENT_START_COMMANDS[AgentName.ClaudeCode]!;
 }

@@ -3,6 +3,8 @@ import { existsSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 import * as p from "@clack/prompts";
+import { WebClient } from "@slack/web-api";
+import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import TelegramBot from "node-telegram-bot-api";
 import qrcode from "qrcode-terminal";
 
@@ -10,7 +12,7 @@ import { createDefaultRegistry } from "../agent/agent-registry.js";
 import { AgentName } from "../agent/types.js";
 import { ConfigManager, type Config } from "../config-manager.js";
 import { Locale, LOCALE_LABELS, setLocale, SUPPORTED_LOCALES, t } from "../i18n/index.js";
-import { DEFAULT_HOOK_PORT, isMacOS, isWindows } from "../utils/constants.js";
+import { ChannelName, DEFAULT_HOOK_PORT, isMacOS, isWindows } from "../utils/constants.js";
 import { detectCliPrefix } from "../utils/install-detection.js";
 import { promptPath } from "../utils/path-prompt.js";
 import { installShellCompletion } from "../utils/shell-completion.js";
@@ -34,27 +36,41 @@ export async function runSetup(options: SetupOptions = {}): Promise<Config> {
   const locale = await promptLanguage(existing);
   setLocale(locale);
 
-  const token = await promptToken(existing);
+  const channel = await promptChannel(existing);
 
-  const tokenUnchanged = existing !== null && token === existing.telegram_bot_token;
-  let userId: number;
+  let token = "";
+  let userId = 0;
 
-  if (tokenUnchanged) {
-    userId = existing!.user_id;
-    p.log.success(t("setup.tokenUnchanged"));
-  } else {
-    const botUsername = await verifyToken(token);
-    userId = await waitForUserStart(token, botUsername);
+  if (channel === ChannelName.Telegram) {
+    token = await promptToken(existing);
+    const tokenUnchanged = existing !== null && token === existing.telegram_bot_token;
+
+    if (tokenUnchanged) {
+      userId = existing!.user_id;
+      p.log.success(t("setup.tokenUnchanged"));
+    } else {
+      const botUsername = await verifyToken(token);
+      userId = await waitForUserStart(token, botUsername);
+    }
+  }
+
+  const config = buildConfig(channel, token, userId, existing, locale, []);
+
+  if (channel === ChannelName.Discord) {
+    await promptDiscordCredentials(config, existing);
+  } else if (channel === ChannelName.Slack) {
+    await promptSlackCredentials(config, existing);
   }
 
   const previousAgents = existing?.agents ?? [];
   const selectedAgents = await promptAgents(previousAgents);
-
-  const config = buildConfig(token, userId, existing, locale, selectedAgents);
+  config.agents = selectedAgents;
 
   saveConfig(config);
   syncAgentHooks(config, previousAgents);
-  registerChatId(userId);
+  if (channel === ChannelName.Telegram) {
+    registerChatId(userId);
+  }
   await promptTmuxSetup();
   await promptProjectSetup(config);
 
@@ -68,6 +84,25 @@ export async function runSetup(options: SetupOptions = {}): Promise<Config> {
   }
 
   return config;
+}
+
+async function promptChannel(existing: Config | null): Promise<string> {
+  const result = await p.select({
+    message: t("setup.channelMessage"),
+    initialValue: existing?.channel ?? ChannelName.Telegram,
+    options: [
+      { value: ChannelName.Telegram, label: "Telegram" },
+      { value: ChannelName.Discord, label: "Discord" },
+      { value: ChannelName.Slack, label: "Slack" },
+    ],
+  });
+
+  if (p.isCancel(result)) {
+    p.cancel(t("setup.cancelled"));
+    process.exit(0);
+  }
+
+  return result;
 }
 
 async function promptLanguage(existing: Config | null): Promise<Locale> {
@@ -211,6 +246,7 @@ async function promptAgents(previousAgents: string[]): Promise<string[]> {
 }
 
 function buildConfig(
+  channel: string,
   token: string,
   userId: number,
   existing: Config | null,
@@ -218,8 +254,9 @@ function buildConfig(
   agents: string[]
 ): Config {
   return {
-    telegram_bot_token: token,
-    user_id: userId,
+    channel,
+    telegram_bot_token: token || existing?.telegram_bot_token || "",
+    user_id: userId || existing?.user_id || 0,
     hook_port: existing?.hook_port || DEFAULT_HOOK_PORT,
     hook_secret: existing?.hook_secret || ConfigManager.generateSecret(),
     locale,
@@ -285,6 +322,256 @@ function registerChatId(userId: number): void {
   state.chat_id = userId;
   ConfigManager.saveChatState(state);
   p.log.success(t("setup.chatIdRegistered"));
+}
+
+async function promptDiscordCredentials(config: Config, existing: Config | null): Promise<void> {
+  const botToken = await p.text({
+    message: t("setup.discordTokenMessage"),
+    placeholder: t("setup.discordTokenPlaceholder"),
+    initialValue: existing?.discord_bot_token ?? "",
+    validate(value) {
+      if (!value || !value.trim()) return t("setup.tokenRequired");
+    },
+  });
+
+  if (p.isCancel(botToken)) {
+    p.cancel(t("setup.cancelled"));
+    process.exit(0);
+  }
+
+  const token = (botToken as string).trim();
+  config.discord_bot_token = token;
+
+  const tokenUnchanged = existing !== null && token === existing.discord_bot_token;
+
+  if (tokenUnchanged && existing?.discord_user_id) {
+    config.discord_user_id = existing.discord_user_id;
+    p.log.success(t("setup.discordTokenUnchanged"));
+    return;
+  }
+
+  const botInfo = await verifyDiscordToken(token);
+  config.discord_user_id = await waitForDiscordDM(token, botInfo.id);
+}
+
+async function verifyDiscordToken(token: string): Promise<{ id: string; username: string }> {
+  const spinner = p.spinner();
+  spinner.start(t("setup.discordVerifyingToken"));
+
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+  try {
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout")), 15_000);
+      client.once(Events.ClientReady, () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    await client.login(token);
+    await ready;
+
+    const id = client.user!.id;
+    const username = client.user!.tag ?? client.user!.username ?? "unknown";
+
+    spinner.stop(t("setup.discordBotVerified", { username }));
+    client.destroy();
+    return { id, username };
+  } catch {
+    client.destroy();
+    spinner.stop(t("setup.discordTokenVerifyFailed"));
+    throw new Error(t("setup.discordTokenVerifyFailed"));
+  }
+}
+
+async function waitForDiscordDM(token: string, botId: string): Promise<string> {
+  const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${botId}&scope=bot%20applications.commands&permissions=18432`;
+
+  p.log.step(t("setup.discordScanOrClick"));
+
+  const qrString = await new Promise<string>((resolve) => {
+    qrcode.generate(inviteUrl, { small: true }, (code: string) => {
+      resolve(code);
+    });
+  });
+
+  const indentedQr = qrString
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => `│    ${line}`)
+    .join("\n");
+
+  process.stdout.write(`${indentedQr}\n│\n│    ${inviteUrl}\n`);
+
+  p.log.step(t("setup.discordWaitingForDM"));
+
+  const client = new Client({
+    intents: [GatewayIntentBits.DirectMessages],
+    partials: [Partials.Channel, Partials.Message],
+  });
+
+  try {
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout")), 15_000);
+      client.once(Events.ClientReady, () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    await client.login(token);
+    await ready;
+
+    const userId = await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(
+          new Error(t("setup.discordWaitingTimeout", { seconds: SETUP_WAIT_TIMEOUT_MS / 1000 }))
+        );
+      }, SETUP_WAIT_TIMEOUT_MS);
+
+      client.on("messageCreate", async (msg) => {
+        if (msg.author.bot) return;
+        if (!msg.channel.isDMBased()) return;
+
+        clearTimeout(timeout);
+        await msg.reply(t("setup.discordUserDetected", { userId: msg.author.id })).catch(() => {});
+        resolve(msg.author.id);
+      });
+    });
+
+    p.log.success(t("setup.discordUserDetected", { userId }));
+    client.destroy();
+    return userId;
+  } catch (err) {
+    client.destroy();
+    throw err;
+  }
+}
+
+async function promptSlackCredentials(config: Config, existing: Config | null): Promise<void> {
+  const botToken = await p.text({
+    message: t("setup.slackTokenMessage"),
+    placeholder: t("setup.slackTokenPlaceholder"),
+    initialValue: existing?.slack_bot_token ?? "",
+    validate(value) {
+      if (!value || !value.trim()) return t("setup.tokenRequired");
+      if (!value.startsWith("xoxb-")) return t("setup.slackTokenInvalidFormat");
+    },
+  });
+
+  if (p.isCancel(botToken)) {
+    p.cancel(t("setup.cancelled"));
+    process.exit(0);
+  }
+
+  const token = (botToken as string).trim();
+  config.slack_bot_token = token;
+
+  const tokenUnchanged = existing !== null && token === existing.slack_bot_token;
+
+  if (tokenUnchanged && existing?.slack_channel_id) {
+    config.slack_channel_id = existing.slack_channel_id;
+    p.log.success(t("setup.slackTokenUnchanged"));
+    return;
+  }
+
+  const verified = await verifySlackToken(token);
+  if (!verified) throw new Error(t("setup.slackTokenVerifyFailed"));
+
+  config.slack_channel_id = await pickSlackChannel(token, existing);
+  await verifySlackChannelMembership(token, config.slack_channel_id);
+}
+
+async function verifySlackToken(token: string): Promise<boolean> {
+  const spinner = p.spinner();
+  spinner.start(t("setup.slackVerifyingToken"));
+
+  try {
+    const client = new WebClient(token);
+    const result = await client.auth.test();
+    spinner.stop(
+      t("setup.slackBotVerified", { name: (result.bot_id as string | undefined) ?? "bot" })
+    );
+    return true;
+  } catch {
+    spinner.stop(t("setup.slackTokenVerifyFailed"));
+    return false;
+  }
+}
+
+async function pickSlackChannel(token: string, existing: Config | null): Promise<string> {
+  const client = new WebClient(token);
+
+  let channels: { id: string; name: string }[] = [];
+  try {
+    const result = await client.conversations.list({
+      types: "public_channel,private_channel",
+      exclude_archived: true,
+      limit: 100,
+    });
+    channels =
+      result.channels
+        ?.filter((c) => c.is_member && c.id && c.name)
+        .map((c) => ({ id: c.id!, name: c.name! })) ?? [];
+  } catch {
+    // scope missing or error — fallback to manual
+  }
+
+  if (channels.length > 0) {
+    const selected = await p.select({
+      message: t("setup.slackSelectChannel"),
+      initialValue: existing?.slack_channel_id ?? channels[0]!.id,
+      options: channels.map((c) => ({ value: c.id, label: `#${c.name}` })),
+    });
+
+    if (p.isCancel(selected)) {
+      p.cancel(t("setup.cancelled"));
+      process.exit(0);
+    }
+
+    return selected;
+  }
+
+  const channelId = await p.text({
+    message: t("setup.slackChannelIdMessage"),
+    placeholder: t("setup.slackChannelIdPlaceholder"),
+    initialValue: existing?.slack_channel_id ?? "",
+    validate(value) {
+      if (!value || !value.trim()) return t("setup.slackChannelIdRequired");
+    },
+  });
+
+  if (p.isCancel(channelId)) {
+    p.cancel(t("setup.cancelled"));
+    process.exit(0);
+  }
+
+  return (channelId as string).trim();
+}
+
+async function verifySlackChannelMembership(token: string, channelId: string): Promise<void> {
+  const spinner = p.spinner();
+  spinner.start(t("setup.slackVerifyingChannel"));
+
+  const client = new WebClient(token);
+  try {
+    const info = await client.conversations.info({ channel: channelId });
+    if (info.channel?.is_member) {
+      spinner.stop(t("setup.slackChannelVerified"));
+      return;
+    }
+  } catch {
+    // fall through to bot name lookup + warning
+  }
+
+  let botName = "your-bot";
+  try {
+    const auth = await client.auth.test();
+    if (auth.user) botName = auth.user as string;
+  } catch {
+    // ignore
+  }
+
+  spinner.stop(t("setup.slackChannelNotMember", { name: botName }));
 }
 
 function getTmuxVersion(): string | null {

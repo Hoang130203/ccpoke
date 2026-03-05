@@ -16,6 +16,7 @@ export interface TranslationKeys {
     connectionLost: string;
     connectionRestored: string;
     startupReady: string;
+    startupReadyPlain: string;
     commands: {
       start: string;
       sessions: string;
@@ -70,6 +71,34 @@ export interface TranslationKeys {
     addAnotherProject: string;
     projectAdded: string;
     skipProject: string;
+    channelMessage: string;
+    discordTokenMessage: string;
+    discordTokenPlaceholder: string;
+    discordUserIdMessage: string;
+    discordUserIdPlaceholder: string;
+    discordUserIdRequired: string;
+    discordVerifyingToken: string;
+    discordBotVerified: string;
+    discordScanOrClick: string;
+    discordWaitingForDM: string;
+    discordUserDetected: string;
+    discordTokenVerifyFailed: string;
+    discordWaitingTimeout: string;
+    discordTokenUnchanged: string;
+    slackTokenMessage: string;
+    slackTokenPlaceholder: string;
+    slackTokenInvalidFormat: string;
+    slackChannelIdMessage: string;
+    slackChannelIdPlaceholder: string;
+    slackChannelIdRequired: string;
+    slackVerifyingToken: string;
+    slackBotVerified: string;
+    slackTokenVerifyFailed: string;
+    slackTokenUnchanged: string;
+    slackSelectChannel: string;
+    slackVerifyingChannel: string;
+    slackChannelNotMember: string;
+    slackChannelVerified: string;
   };
   uninstall: {
     intro: string;

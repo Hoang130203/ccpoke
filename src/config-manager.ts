@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 
 import { isValidLocale, Locale, setLocale, t } from "./i18n/index.js";
-import { DEFAULT_HOOK_PORT } from "./utils/constants.js";
+import { ChannelName, DEFAULT_HOOK_PORT } from "./utils/constants.js";
 import { paths } from "./utils/paths.js";
 
 export interface ProjectEntry {
@@ -11,8 +11,13 @@ export interface ProjectEntry {
 }
 
 export interface Config {
+  channel: string;
   telegram_bot_token: string;
   user_id: number;
+  discord_bot_token?: string;
+  discord_user_id?: string;
+  slack_bot_token?: string;
+  slack_channel_id?: string;
   hook_port: number;
   hook_secret: string;
   locale: Locale;
@@ -22,6 +27,7 @@ export interface Config {
 
 export interface ChatState {
   chat_id: number | null;
+  discord_dm_id?: string | null;
 }
 
 export class ConfigManager {
@@ -47,7 +53,7 @@ export class ConfigManager {
       throw new Error(t("config.invalidJson"), { cause: err });
     }
     const cfg = ConfigManager.validate(raw);
-    if (cfg.hook_secret !== raw.hook_secret || !raw.agents || !raw.projects) {
+    if (cfg.hook_secret !== raw.hook_secret || !raw.agents || !raw.projects || !raw.channel) {
       ConfigManager.save(cfg);
     }
     setLocale(cfg.locale);
@@ -90,12 +96,44 @@ export class ConfigManager {
       throw new Error(t("config.mustBeObject"));
     }
 
-    if (typeof data.telegram_bot_token !== "string" || !data.telegram_bot_token.includes(":")) {
-      throw new Error(t("config.invalidToken"));
+    const validChannelNames = new Set(Object.values(ChannelName) as string[]);
+    let channel: string;
+    if (typeof data.channel === "string" && validChannelNames.has(data.channel)) {
+      channel = data.channel;
+    } else if (Array.isArray(data.channels) && data.channels.length > 0) {
+      const first = data.channels.find(
+        (c): c is string => typeof c === "string" && validChannelNames.has(c)
+      );
+      channel = first ?? ChannelName.Telegram;
+    } else {
+      channel = ChannelName.Telegram;
     }
 
-    if (typeof data.user_id !== "number" || !Number.isInteger(data.user_id)) {
-      throw new Error(t("config.invalidUserId"));
+    if (channel === ChannelName.Telegram) {
+      if (typeof data.telegram_bot_token !== "string" || !data.telegram_bot_token.includes(":")) {
+        throw new Error(t("config.invalidToken"));
+      }
+      if (typeof data.user_id !== "number" || !Number.isInteger(data.user_id)) {
+        throw new Error(t("config.invalidUserId"));
+      }
+    }
+
+    if (channel === ChannelName.Discord) {
+      if (typeof data.discord_bot_token !== "string" || data.discord_bot_token.length === 0) {
+        throw new Error(t("config.invalidToken"));
+      }
+      if (typeof data.discord_user_id !== "string" || data.discord_user_id.length === 0) {
+        throw new Error(t("config.invalidUserId"));
+      }
+    }
+
+    if (channel === ChannelName.Slack) {
+      if (typeof data.slack_bot_token !== "string" || !data.slack_bot_token.startsWith("xoxb-")) {
+        throw new Error(t("config.invalidToken"));
+      }
+      if (typeof data.slack_channel_id !== "string" || data.slack_channel_id.length === 0) {
+        throw new Error(t("config.invalidUserId"));
+      }
     }
 
     let hookPort = DEFAULT_HOOK_PORT;
@@ -140,14 +178,21 @@ export class ConfigManager {
     }
 
     const cfg: Config = {
-      telegram_bot_token: data.telegram_bot_token,
-      user_id: data.user_id,
+      channel,
+      telegram_bot_token:
+        typeof data.telegram_bot_token === "string" ? data.telegram_bot_token : "",
+      user_id: typeof data.user_id === "number" ? data.user_id : 0,
       hook_port: hookPort,
       hook_secret: hookSecret,
       locale,
       agents,
       projects,
     };
+
+    if (typeof data.discord_bot_token === "string") cfg.discord_bot_token = data.discord_bot_token;
+    if (typeof data.discord_user_id === "string") cfg.discord_user_id = data.discord_user_id;
+    if (typeof data.slack_bot_token === "string") cfg.slack_bot_token = data.slack_bot_token;
+    if (typeof data.slack_channel_id === "string") cfg.slack_channel_id = data.slack_channel_id;
 
     return cfg;
   }

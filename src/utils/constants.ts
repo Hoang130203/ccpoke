@@ -49,6 +49,14 @@ export const ApiRoute = {
 export const DEFAULT_HOOK_PORT = 9377;
 export const MINI_APP_BASE_URL = "https://kaida-palooza.github.io/ccpoke";
 
+export const ChannelName = {
+  Telegram: "telegram",
+  Discord: "discord",
+  Slack: "slack",
+} as const;
+
+export type ChannelName = (typeof ChannelName)[keyof typeof ChannelName];
+
 export const Platform = {
   Windows: "win32",
   MacOS: "darwin",
