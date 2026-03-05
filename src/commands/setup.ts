@@ -406,7 +406,7 @@ async function waitForDiscordDM(token: string, botId: string): Promise<string> {
   p.log.step(t("setup.discordWaitingForDM"));
 
   const client = new Client({
-    intents: [GatewayIntentBits.DirectMessages],
+    intents: [GatewayIntentBits.DirectMessages, GatewayIntentBits.Guilds],
     partials: [Partials.Channel, Partials.Message],
   });
 
@@ -427,6 +427,18 @@ async function waitForDiscordDM(token: string, botId: string): Promise<string> {
           new Error(t("setup.discordWaitingTimeout", { seconds: SETUP_WAIT_TIMEOUT_MS / 1000 }))
         );
       }, SETUP_WAIT_TIMEOUT_MS);
+
+      client.on(Events.GuildCreate, async (guild) => {
+        try {
+          const owner = await guild.fetchOwner();
+          const dm = await owner.createDM();
+          await dm.send(t("setup.discordUserDetected", { userId: owner.id }));
+          clearTimeout(timeout);
+          resolve(owner.id);
+        } catch {
+          // guild owner DM failed — fall back to waiting for manual DM
+        }
+      });
 
       client.on("messageCreate", async (msg) => {
         if (msg.author.bot) return;
