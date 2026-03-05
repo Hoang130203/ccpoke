@@ -5,7 +5,7 @@
 - **Language:** TypeScript 5.7.3, targeting ES2022 with ESM modules
 - **Runtime:** Node.js ≥20
 - **Lines of Code:** ~7,897 LOC in src/ (56 TS files)
-- **Architecture:** Multi-agent provider pattern with channel abstraction
+- **Architecture:** Multi-agent provider pattern with single-channel selection
 - **Version:** 1.6.16
 
 ---
@@ -18,7 +18,7 @@ ccpoke/
 │   ├── index.ts               # Entry point, bot lifecycle orchestration (228 LOC)
 │   ├── config-manager.ts      # Config persistence & schema migration (127 LOC)
 │   ├── agent/                 # Multi-agent provider framework
-│   ├── channel/               # Notification channels (Telegram, extensible)
+│   ├── channel/               # Notification channels (Telegram, Discord, Slack — single active)
 │   ├── server/                # Express API server
 │   ├── tmux/                  # Terminal session management
 │   ├── commands/              # CLI commands (setup, uninstall, update, help, project)
@@ -84,17 +84,28 @@ Implements the **Adapter Pattern** for multi-channel support.
 | File | LOC | Responsibility |
 |------|-----|-----------------|
 | **types.ts** | 25 | `NotificationChannel` interface definition |
-| **telegram-channel.ts** | 730 | Bot lifecycle, Telegram handlers, notification formatting, session management |
-| **telegram-sender.ts** | 97 | Message sending, pagination, Markdown escaping |
-| **pending-reply-store.ts** | 43 | In-memory store for tracking pending replies (10min TTL) |
-| **session-list.ts** | 60 | `/sessions` command formatting with state emojis and Chat buttons |
-| **prompt-handler.ts** | 163 | Forwards elicitation_dialog and idle_prompt events with force_reply |
-| **permission-request-handler.ts** | 192 | Forward tool-use Allow/Deny decisions to Telegram inline keyboard |
-| **ask-question-handler.ts** | 377 | Forward AskUserQuestion to Telegram with multi-step inline keyboards |
-| **ask-question-keyboard-builder.ts** | - | Build dynamic inline keyboards for question responses |
-| **ask-question-tui-injector.ts** | - | Inject keystroke answers into terminal UI |
-| **project-list.ts** | - | Format /projects inline keyboard with project paths |
-| **escape-markdown.ts** | - | MarkdownV2 escaping utilities |
+| **telegram/telegram-channel.ts** | 730 | Bot lifecycle, Telegram handlers, notification formatting, session management |
+| **telegram/telegram-sender.ts** | 97 | Message sending, pagination, Markdown escaping |
+| **telegram/pending-reply-store.ts** | 43 | In-memory store for tracking pending replies (10min TTL) |
+| **telegram/session-list.ts** | 60 | `/sessions` command formatting with state emojis and Chat buttons |
+| **telegram/prompt-handler.ts** | 163 | Forwards elicitation_dialog and idle_prompt events with force_reply |
+| **telegram/permission-request-handler.ts** | 192 | Forward tool-use Allow/Deny decisions to Telegram inline keyboard |
+| **telegram/ask-question-handler.ts** | 377 | Forward AskUserQuestion to Telegram with multi-step inline keyboards |
+| **telegram/ask-question-keyboard-builder.ts** | - | Build dynamic inline keyboards for question responses |
+| **telegram/ask-question-tui-injector.ts** | - | Inject keystroke answers into terminal UI |
+| **telegram/project-list.ts** | - | Format /projects inline keyboard with project paths |
+| **telegram/escape-markdown.ts** | - | MarkdownV2 escaping utilities |
+| **slack/slack-channel.ts** | 47 | Slack WebClient lifecycle, initialize via auth.test(), sendNotification |
+| **slack/slack-sender.ts** | 36 | Slack Web API wrapper; splits >50 Block Kit blocks into chunks |
+| **slack/slack-block-builder.ts** | 70 | Builds `KnownBlock[]` from `NotificationData` (header, fields, summary, context, action button) |
+| **discord/discord-channel.ts** | ~340 | Discord bot lifecycle, DM channel, interaction/message event routing |
+| **discord/discord-sender.ts** | ~40 | Sends embeds to Discord DM with error handling |
+| **discord/discord-markdown.ts** | ~50 | NotificationData → Discord EmbedBuilder formatting |
+| **discord/discord-permission-handler.ts** | ~180 | Allow/Deny button builder + interactionCreate handler |
+| **discord/discord-ask-question-handler.ts** | ~330 | Single/multi-select buttons, "Other" free-text, 5-row cap |
+| **discord/discord-prompt-handler.ts** | ~140 | Elicitation/idle prompt forwarding with DM reply capture |
+| **discord/discord-session-command-handler.ts** | ~210 | /sessions, /projects slash commands + session list embed |
+| **discord/discord-agent-launcher.ts** | ~75 | Launch agent sessions from Discord project selection |
 
 ### Terminal Session Management (`src/tmux/`)
 
@@ -351,6 +362,7 @@ idle → blocked → busy → idle
 |---------|---------|---------|
 | **express** | ^5 | HTTP server |
 | **node-telegram-bot-api** | ^0.63 | Telegram Bot API client |
+| **@slack/web-api** | ^7 | Slack Web API client (Block Kit messaging) |
 | **better-sqlite3** | ^9 | SQLite driver (Cursor state) |
 | **cloudflared** | Latest | Cloudflare tunnel binary |
 | **@clack/prompts** | ^0.7 | CLI prompt library |

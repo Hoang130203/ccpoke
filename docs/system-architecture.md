@@ -34,8 +34,19 @@ This document describes the overall system architecture, component interactions,
 │                    │  └──────────────────────────┘   │           │
 │                    │                                 │           │
 │                    │  ┌──────────────────────────┐   │           │
-│                    │  │  Telegram Channel        │   │           │
-│                    │  │  (Notification Sender)   │   │           │
+│                    │  │  Notification Channel    │   │           │
+│                    │  │  (Single active channel) │   │           │
+│                    │  │                          │   │           │
+│                    │  │  One of:                 │   │           │
+│                    │  │  ├─ TelegramChannel      │   │           │
+│                    │  │  │  (Bot, handlers)      │   │           │
+│                    │  │  │                       │   │           │
+│                    │  │  ├─ DiscordChannel       │   │           │
+│                    │  │  │  (discord.js, DM,     │   │           │
+│                    │  │  │   buttons, slash cmds)│   │           │
+│                    │  │  │                       │   │           │
+│                    │  │  └─ SlackChannel         │   │           │
+│                    │  │     (WebClient, blocks)  │   │           │
 │                    │  └──────────────────────────┘   │           │
 │                    │                                 │           │
 │                    │  ┌──────────────────────────┐   │           │
@@ -56,14 +67,17 @@ This document describes the overall system architecture, component interactions,
 │                    │  (Project Context)           │              │
 │                    └──────────────────────────────┘              │
 │                                                                  │
-└─────────────────────────────────┬────────────────────────────────┘
-                                  │
-                         Telegram API
-                                  │
-                          ┌───────▼────────┐
-                          │  Telegram Bot  │
-                          │  (Phone User)  │
-                          └────────────────┘
+└────────────────────────────┬──────────────────────────────────────┘
+                            │ │
+                            │ │
+                   Telegram  │ │  Slack Web API
+                        API  │ │
+                            │ │
+                      ┌──────▼─▼────────────┐
+                      │ Telegram Bot + Slack│
+                      │     Channel         │
+                      │  (User Chat UI)     │
+                      └─────────────────────┘
 ```
 
 ---
@@ -105,7 +119,7 @@ Emit to Notification Channel
 
 ### 2. Notification Channel
 
-**Responsibility:** Send notifications to users via Telegram.
+**Responsibility:** Send notifications to users via a single configured channel (Telegram, Discord, or Slack — selected during setup).
 
 **Components:**
 - **TelegramChannel** — Bot lifecycle and message handling (sessions, permission requests, ask-question)
@@ -113,10 +127,23 @@ Emit to Notification Channel
 - **PermissionRequestHandler** — Forward tool-use Allow/Deny to Telegram
 - **AskQuestionHandler** — Forward AskUserQuestion events to Telegram
 - **PendingReplyStore** — Tracks pending user replies (10min TTL, auto-cleanup on shutdown)
+- **SlackChannel** — Slack Web API integration via `@slack/web-api`
+- **SlackSender** — Sends Block Kit messages; splits >50 blocks automatically
+- **SlackBlockBuilder** — Builds `KnownBlock[]` from `NotificationData`
+- **DiscordChannel** — Discord bot via `discord.js` (DM-based, gateway intents, interaction/message routing)
+- **DiscordSender** — Sends embeds to Discord DM
+- **DiscordMarkdown** — NotificationData → Discord EmbedBuilder
+- **DiscordPermissionHandler** — Allow/Deny buttons for tool-use approvals
+- **DiscordAskQuestionHandler** — Single/multi-select option buttons (5-row cap)
+- **DiscordPromptHandler** — Elicitation/idle prompt forwarding with DM reply capture
+- **DiscordSessionCommandHandler** — /sessions, /projects slash commands
+- **DiscordAgentLauncher** — Launch agent sessions from project selection
 
-**Key Operations:**
+**Key Operations (Telegram example):**
 ```
 Notification Event Received
+    ↓
+channel.sendNotification()
     ↓
 Format Message (Markdown conversion)
     ↓
@@ -140,7 +167,8 @@ Auto-cleanup on timeout or explicit destroy()
 
 **Features:**
 - Auto-split long messages
-- Markdown to MarkdownV2 conversion
+- Markdown to MarkdownV2 conversion (Telegram)
+- Block Kit structured formatting (Slack)
 - Rate limiting (Telegram: 30 msg/sec)
 - Message editing (progress updates)
 
