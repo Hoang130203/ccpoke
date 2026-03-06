@@ -250,6 +250,16 @@ export class TelegramChannel implements NotificationChannel {
           // fall through to chat: handler below
         }
 
+        if (query.data?.startsWith("session_switch:")) {
+          await this.handleSessionSwitchMenu(query);
+          return;
+        }
+
+        if (query.data?.startsWith("sw_ag:")) {
+          await this.handleSessionSwitchExecute(query);
+          return;
+        }
+
         if (query.data?.startsWith("session_close:")) {
           await this.handleSessionCloseConfirm(query);
           return;
@@ -574,6 +584,10 @@ export class TelegramChannel implements NotificationChannel {
           [
             { text: `💬 ${t("sessions.chatButton")}`, callback_data: `session_chat:${sessionId}` },
             {
+              text: `🔄 ${t("sessions.switchButton")}`,
+              callback_data: `session_switch:${sessionId}`,
+            },
+            {
               text: `🗑 ${t("sessions.closeButton")}`,
               callback_data: `session_close:${sessionId}`,
             },
@@ -643,6 +657,117 @@ export class TelegramChannel implements NotificationChannel {
       chat_id: query.message.chat.id,
       message_id: query.message.message_id,
     });
+  }
+
+  /** Show agent selection menu for switching CLI */
+  private async handleSessionSwitchMenu(query: TelegramBot.CallbackQuery): Promise<void> {
+    const sessionId = query.data!.slice(15); // "session_switch:".length === 15
+    if (!this.sessionMap || !query.message) {
+      await this.bot.answerCallbackQuery(query.id, { text: t("chat.sessionExpired") });
+      return;
+    }
+
+    const session = this.resolveSession(sessionId);
+    if (!session) {
+      await this.bot.answerCallbackQuery(query.id, { text: t("chat.sessionExpired") });
+      return;
+    }
+
+    if (!this.tmuxBridge || !this.tmuxBridge.isTmuxAvailable()) {
+      await this.bot.answerCallbackQuery(query.id, { text: t("projects.noTmux") });
+      return;
+    }
+
+    const cfg = ConfigManager.load();
+    const otherAgents = cfg.agents.filter((a) => a !== session.agent);
+
+    if (otherAgents.length === 0) {
+      await this.bot.answerCallbackQuery(query.id, { text: t("sessions.noAgentsToSwitch") });
+      return;
+    }
+
+    await this.bot.answerCallbackQuery(query.id);
+
+    const buttons: TelegramBot.InlineKeyboardButton[] = otherAgents.map((agent) => ({
+      text: AGENT_DISPLAY_NAMES[agent as AgentName] ?? agent,
+      callback_data: `sw_ag:${sessionId}:${agent}`,
+    }));
+
+    const rows: TelegramBot.InlineKeyboardButton[][] = [];
+    for (let i = 0; i < buttons.length; i += 3) {
+      rows.push(buttons.slice(i, i + 3));
+    }
+
+    await this.bot.sendMessage(
+      query.message.chat.id,
+      t("sessions.chooseSwitch", { project: session.project }),
+      { reply_markup: { inline_keyboard: rows } }
+    );
+  }
+
+  /** Kill current CLI pane and launch a new agent in same cwd */
+  private async handleSessionSwitchExecute(query: TelegramBot.CallbackQuery): Promise<void> {
+    // "sw_ag:".length === 6, format: sw_ag:<sessionId>:<agentKey>
+    const rest = query.data!.slice(6);
+    const colonIdx = rest.lastIndexOf(":");
+    if (colonIdx === -1) {
+      await this.bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const sessionId = rest.slice(0, colonIdx);
+    const agentKey = rest.slice(colonIdx + 1);
+
+    if (!this.sessionMap || !this.tmuxBridge || !query.message) {
+      await this.bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    const session = this.resolveSession(sessionId);
+    if (!session) {
+      await this.bot.answerCallbackQuery(query.id, { text: t("chat.sessionExpired") });
+      return;
+    }
+
+    await this.bot.answerCallbackQuery(query.id);
+    await this.bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
+
+    const cwd = session.cwd;
+
+    try {
+      this.tmuxBridge.killPane(session.tmuxTarget);
+    } catch {
+      // pane may already be dead
+    }
+    this.sessionMap.unregister(sessionId);
+    this.sessionMap.save();
+
+    try {
+      const { paneTarget, needsTrust } = launchAgent(this.tmuxBridge, cwd, agentKey);
+
+      if (needsTrust) {
+        autoTrustWorkspace(
+          this.tmuxBridge,
+          paneTarget,
+          agentKey,
+          () => {},
+          () => {}
+        );
+      }
+
+      const agentDisplayName = AGENT_DISPLAY_NAMES[agentKey as AgentName] ?? agentKey;
+      log(`[Sessions] switched ${session.project} from ${session.agent} to ${agentKey} (${paneTarget})`);
+      await this.bot.sendMessage(
+        query.message.chat.id,
+        t("sessions.switched", { project: session.project, agent: agentDisplayName })
+      );
+    } catch (err) {
+      logError(`[Sessions] switch failed for ${session.project}`, err);
+      await this.bot.sendMessage(
+        query.message.chat.id,
+        t("sessions.switchFailed", { project: session.project })
+      );
+    }
   }
 
   private registerPollingErrorHandler(): void {

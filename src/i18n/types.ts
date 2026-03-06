@@ -223,6 +223,11 @@ export interface TranslationKeys {
     empty: string;
     chatButton: string;
     closeButton: string;
+    switchButton: string;
+    chooseSwitch: string;
+    switched: string;
+    switchFailed: string;
+    noAgentsToSwitch: string;
     confirmClose: string;
     closed: string;
     yes: string;
